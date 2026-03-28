@@ -37,6 +37,15 @@ router.post('/', upload.single('resume'), (req, res) => {
       console.error('Failed to parse techStack:', e);
     }
   }
+
+  if (req.body.locations && typeof req.body.locations === 'string') {
+    try {
+      req.body.locations = JSON.parse(req.body.locations);
+    } catch (e) {
+      // fallback: treat as comma-separated string
+      req.body.locations = req.body.locations.split(',').map((l: string) => l.trim()).filter(Boolean);
+    }
+  }
   
   // Convert numeric fields
   if (req.body.yearsExperience) {

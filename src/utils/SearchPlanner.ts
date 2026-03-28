@@ -16,26 +16,18 @@ export class SearchPlanner {
   private generateKeywords(profile: UserProfile): string[] {
     const keywords: string[] = [];
 
-    // Add role-based keywords
+    // Role first
     keywords.push(profile.role);
-    
-    // Add variations of the role
-    const roleVariations = this.getRoleVariations(profile.role);
-    keywords.push(...roleVariations);
 
-    // Add primary technology
+    // Primary technology only (not the whole stack — too many = 0 results)
     if (profile.primaryTechnology) {
       keywords.push(profile.primaryTechnology);
     }
 
-    // Add all tech stack technologies
-    keywords.push(...profile.techStack);
-
-    // Add experience level keywords
+    // Experience level keywords
     const experienceKeywords = this.getExperienceKeywords(profile.yearsExperience);
     keywords.push(...experienceKeywords);
 
-    // Remove duplicates and return
     return [...new Set(keywords)];
   }
 
@@ -127,17 +119,16 @@ export class SearchPlanner {
       postedWithin: profile.postingAgeWindow
     };
 
-    // If user provided a specific location, use it directly
-    if (profile.location && profile.location.trim()) {
-      filters.location = profile.location.trim();
+    // If user provided specific locations, use them; otherwise fall back to preference
+    if (profile.locations?.length) {
+      filters.locations = profile.locations;
     } else {
-      // Fall back to preference-based location
       switch (profile.locationPreference) {
         case LocationPreference.Remote:
-          filters.location = 'remote';
+          filters.locations = ['Remote'];
           break;
         case LocationPreference.Hybrid:
-          filters.location = 'hybrid';
+          filters.locations = ['Hybrid'];
           break;
         case LocationPreference.OnSite:
         case LocationPreference.Flexible:

@@ -7,9 +7,9 @@ export const userProfileSchema = Joi.object({
   primaryTechnology: Joi.string().optional(),
   yearsExperience: Joi.number().min(0).max(50).required(), // Allow decimal numbers
   locationPreference: Joi.string().valid(...Object.values(LocationPreference)).required(),
-  location: Joi.string().optional().allow(''), // specific city/country
+  locations: Joi.array().items(Joi.string()).optional(), // array of cities
   jobType: Joi.string().valid(...Object.values(JobType)).required(),
-  resume: Joi.any().required(), // File validation handled separately
+  resume: Joi.any().required(),
   postingAgeWindow: Joi.number().integer().min(1).max(30).optional().default(7),
 });
 
@@ -19,7 +19,7 @@ export const userProfileInputSchema = Joi.object({
   primaryTechnology: Joi.string().optional().allow(''),
   yearsExperience: Joi.number().min(0).max(50).required(), // Allow decimal numbers
   locationPreference: Joi.string().valid(...Object.values(LocationPreference)).required(),
-  location: Joi.string().optional().allow(''), // specific city/country
+  locations: Joi.array().items(Joi.string()).optional(), // array of cities
   jobType: Joi.string().valid(...Object.values(JobType)).required(),
   postingAgeWindow: Joi.number().integer().min(1).max(30).optional(),
   // Contact information (optional)

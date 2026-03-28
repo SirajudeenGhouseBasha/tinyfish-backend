@@ -56,7 +56,7 @@ export interface UserProfile {
   primaryTechnology?: string;
   yearsExperience: number;
   locationPreference: LocationPreference;
-  location?: string; // specific city/country e.g. "New York", "Remote"
+  locations?: string[]; // e.g. ["Hyderabad", "Bangalore", "Remote"]
   jobType: JobType;
   resumePath: string;
   postingAgeWindow: number;
@@ -195,7 +195,7 @@ export interface SessionReport {
 // ============================================================================
 
 export interface SearchFilters {
-  location?: string;
+  locations?: string[]; // array of locations for LinkedIn multi-location search
   jobType?: JobType;
   experienceLevel?: string;
   postedWithin?: number; // days
@@ -217,7 +217,7 @@ export interface UserProfileInput {
   primaryTechnology?: string;
   yearsExperience: number;
   locationPreference: LocationPreference;
-  location?: string; // specific city/country e.g. "New York", "London"
+  locations?: string[]; // e.g. ["Hyderabad", "Bangalore", "Remote"]
   jobType: JobType;
   postingAgeWindow?: number;
   firstName?: string;

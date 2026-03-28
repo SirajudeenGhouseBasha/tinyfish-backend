@@ -53,19 +53,30 @@ export class RealTinyFishClient extends EventEmitter implements TinyFishClient {
 
   private async searchLinkedIn(strategy: SearchStrategy): Promise<JobListing[]> {
     try {
-      const keywords = strategy.keywords.join(' ');
-      const location = strategy.filters.location || 'United States';
+      // Use only role + primary tech — too many keywords = 0 results
+      const primaryKeywords = strategy.keywords.slice(0, 3).join(' ');
+      const locations = strategy.filters.locations?.length
+        ? strategy.filters.locations
+        : ['India']; // fallback
 
-      // Build LinkedIn search URL — Easy Apply only (f_AL=true)
-      const params = new URLSearchParams({
-        keywords,
-        location,
-        f_TPR: `r${strategy.filters.postedWithin || 2592000}`,
+      // f_TPR is in SECONDS: postingAgeWindow is in days → multiply by 86400
+      const postedWithinSeconds = (strategy.filters.postedWithin || 7) * 86400;
+
+      // LinkedIn supports multiple locations via repeated `location` params
+      const baseParams = new URLSearchParams({
+        keywords: primaryKeywords,
+        f_TPR: `r${postedWithinSeconds}`,
         f_JT: this.mapJobType(strategy.filters.jobType),
-        f_AL: 'true',
+        f_AL: 'true', // Easy Apply only
+        sortBy: 'DD',  // Most recent first
       });
 
-      const linkedInUrl = `https://www.linkedin.com/jobs/search/?${params.toString()}`;
+      // Append each location as a separate param
+      for (const loc of locations) {
+        baseParams.append('location', loc);
+      }
+
+      const linkedInUrl = `https://www.linkedin.com/jobs/search/?${baseParams.toString()}`;
       console.log(`🔍 Searching LinkedIn: ${linkedInUrl}`);
 
       // Run automation — streaming_url comes from the SSE STREAMING_URL event
@@ -95,7 +106,7 @@ STEP 2: For EACH job listing (process at least 5 jobs):
   B. Check Eligibility:
      - Does it match tech stack: ${strategy.keywords.slice(0, 5).join(', ')}?
      - Is experience requirement 0-3 years?
-     - Is location matching: ${location}?
+     - Is location in: ${locations.join(', ')}?
 
   C. If ELIGIBLE:
      - Look ONLY for the "Easy Apply" button (LinkedIn's built-in apply)

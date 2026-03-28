@@ -39,7 +39,7 @@ export class ProfileService {
     `;
 
     const techStackJson = JSON.stringify(profile.techStack);
-    console.log('ProfileService - techStackJson:', techStackJson);
+    const locationsJson = profile.locations?.length ? JSON.stringify(profile.locations) : null;
 
     const values = [
       sessionId,
@@ -48,7 +48,7 @@ export class ProfileService {
       profile.primaryTechnology,
       profile.yearsExperience,
       profile.locationPreference,
-      profile.location || null,
+      locationsJson,
       profile.jobType,
       profile.resumePath,
       profile.postingAgeWindow
@@ -83,7 +83,7 @@ export class ProfileService {
       primaryTechnology: row.primary_technology,
       yearsExperience: row.years_experience,
       locationPreference: row.location_preference,
-      location: row.location || undefined,
+      locations: row.location ? JSON.parse(row.location) : undefined,
       jobType: row.job_type,
       resumePath: row.resume_path,
       postingAgeWindow: row.posting_age_window
