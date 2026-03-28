@@ -1,0 +1,1 @@
+export { userProfileSchema, userProfileInputSchema } from './userProfile';
