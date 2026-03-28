@@ -6,6 +6,7 @@ export class UserProfile implements IUserProfile {
   primaryTechnology?: string;
   yearsExperience: number;
   locationPreference: LocationPreference;
+  location?: string;
   jobType: JobType;
   resumePath: string;
   postingAgeWindow: number;
@@ -16,6 +17,7 @@ export class UserProfile implements IUserProfile {
     this.primaryTechnology = data.primaryTechnology;
     this.yearsExperience = data.yearsExperience;
     this.locationPreference = data.locationPreference;
+    this.location = data.location;
     this.jobType = data.jobType;
     this.resumePath = data.resumePath;
     this.postingAgeWindow = data.postingAgeWindow || 7;
