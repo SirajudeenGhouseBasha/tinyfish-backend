@@ -60,9 +60,9 @@ export class RealTinyFishClient extends EventEmitter implements TinyFishClient {
       const params = new URLSearchParams({
         keywords,
         location,
-        f_TPR: `r${strategy.filters.postedWithin || 2592000}`, // 30 days default
+        f_TPR: `r${strategy.filters.postedWithin || 2592000}`,
         f_JT: this.mapJobType(strategy.filters.jobType),
-        f_AL: 'true', // Easy Apply only
+        f_AL: 'true',
       });
 
       const linkedInUrl = `https://www.linkedin.com/jobs/search/?${params.toString()}`;
@@ -95,7 +95,7 @@ STEP 2: For EACH job listing (process at least 5 jobs):
   B. Check Eligibility:
      - Does it match tech stack: ${strategy.keywords.slice(0, 5).join(', ')}?
      - Is experience requirement 0-3 years?
-     - Is location remote or flexible?
+     - Is location matching: ${location}?
 
   C. If ELIGIBLE:
      - Look ONLY for the "Easy Apply" button (LinkedIn's built-in apply)

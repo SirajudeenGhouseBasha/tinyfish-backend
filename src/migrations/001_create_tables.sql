@@ -92,7 +92,11 @@ BEGIN
 END;
 $$ language 'plpgsql';
 
--- Create triggers for updated_at
+-- Create triggers for updated_at (DROP first to avoid "already exists" error on re-run)
+DROP TRIGGER IF EXISTS update_user_profiles_updated_at ON user_profiles;
+DROP TRIGGER IF EXISTS update_job_search_sessions_updated_at ON job_search_sessions;
+DROP TRIGGER IF EXISTS update_application_records_updated_at ON application_records;
+
 CREATE TRIGGER update_user_profiles_updated_at BEFORE UPDATE ON user_profiles FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 CREATE TRIGGER update_job_search_sessions_updated_at BEFORE UPDATE ON job_search_sessions FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 CREATE TRIGGER update_application_records_updated_at BEFORE UPDATE ON application_records FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
