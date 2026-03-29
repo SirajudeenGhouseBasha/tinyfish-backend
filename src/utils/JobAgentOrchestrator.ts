@@ -34,23 +34,24 @@ export class JobAgentOrchestrator extends EventEmitter {
     if (apiKey && apiKey !== 'your-tinyfish-api-key-here') {
       console.log('✅ Using Real TinyFish API Client with SSE streaming');
       this.tinyFishClient = new RealTinyFishClient(apiKey);
-
-      // Forward TinyFish events
-      this.tinyFishClient.on('streamingUrl', (url: string) => {
-        console.log('📺 Forwarding streaming URL to frontend:', url);
-        this.emit('streamingUrl', url);
-      });
-
-      this.tinyFishClient.on('progress', (data: any) => {
-        console.log('⏳ TinyFish progress:', data.message);
-        // Progress messages are already logged via emitLog
-      });
     } else {
       console.warn('⚠️  No valid TinyFish API key found - using MockTinyFishClient');
-      console.warn('   Set TINYFISH_API_KEY in .env to use real LinkedIn integration');
+      console.warn('   Set TINYFISH_API_KEY in .env to use real Internshala integration');
       console.warn('   Get your API key from: https://agent.tinyfish.ai/api-keys');
       this.tinyFishClient = new MockTinyFishClient();
     }
+
+    // Forward TinyFish events (works for both Real and Mock clients)
+    this.tinyFishClient.on('streamingUrl', (url: string) => {
+      console.log('📺 Forwarding streaming URL to frontend:', url);
+      this.emit('streamingUrl', url);
+    });
+
+    this.tinyFishClient.on('progress', (data: any) => {
+      console.log('⏳ TinyFish progress:', data.message);
+      // Progress messages are already logged via emitLog
+    });
+
     this.applicationTracker = new ApplicationTracker();
   }
 
@@ -95,7 +96,7 @@ export class JobAgentOrchestrator extends EventEmitter {
         `Intent analyzed: ${intentAnalysis.userContext.experienceLevel} level, ${intentAnalysis.userContext.mobilityConstraints}`);
 
       // Stage 3: Job Scraping with TinyFish
-      this.emitLog(sessionId, PipelineStage.Scraping, LogLevel.Info, 'Scraping job listings from LinkedIn');
+      this.emitLog(sessionId, PipelineStage.Scraping, LogLevel.Info, 'Scraping job listings from Internshala');
       const scrapedJobs = await this.tinyFishClient.searchJobs(searchStrategy);
       stats.totalScanned = scrapedJobs.length;
 
@@ -264,13 +265,12 @@ export class JobAgentOrchestrator extends EventEmitter {
       const ext = path.extname(resumePath).toLowerCase();
 
       if (ext === '.pdf') {
-        // pdf-parse v2.x exports a default function
-        const pdfParseModule = require('pdf-parse');
-        const pdfParse = pdfParseModule.default || pdfParseModule;
-        const data = await pdfParse(buffer);
+        const { PDFParse } = require('pdf-parse');
+        const parser = new PDFParse({ data: buffer });
+        const result = await parser.getText();
+        const text = result.pages.map((p: any) => p.text).join('\n');
         console.log('✅ Successfully extracted text from PDF');
-        console.log(`   Extracted ${data.text.length} characters from ${data.numpages} pages`);
-        return data.text;
+        return text;
       } else if (ext === '.docx') {
         const mammoth = require('mammoth');
         const result = await mammoth.extractRawText({ buffer });

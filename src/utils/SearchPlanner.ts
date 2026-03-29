@@ -70,8 +70,11 @@ export class SearchPlanner {
   private selectJobBoards(profile: UserProfile): string[] {
     const jobBoards: string[] = [];
 
-    // Always include major job boards
-    jobBoards.push('linkedin.com', 'indeed.com', 'glassdoor.com');
+    // Always include Internshala as primary job board (no 2FA required)
+    jobBoards.push('internshala.com');
+
+    // Add other major job boards
+    jobBoards.push('indeed.com', 'glassdoor.com');
 
     // Add tech-specific boards
     const techBoards = ['stackoverflow.com/jobs', 'github.com/jobs', 'angel.co'];
@@ -143,7 +146,8 @@ export class SearchPlanner {
   }
 
   private getExperienceLevelFilter(yearsExperience: number): string {
-    if (yearsExperience <= 2) {
+    // For Internshala, always use entry-level for 0-3 years to access fresher job categories
+    if (yearsExperience <= 3) {
       return 'entry-level';
     } else if (yearsExperience <= 5) {
       return 'mid-level';

@@ -195,7 +195,7 @@ export interface SessionReport {
 // ============================================================================
 
 export interface SearchFilters {
-  locations?: string[]; // array of locations for LinkedIn multi-location search
+  locations?: string[]; // array of locations for multi-location search
   jobType?: JobType;
   experienceLevel?: string;
   postedWithin?: number; // days

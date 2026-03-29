@@ -22,24 +22,73 @@ export class HardFilter {
   }
 
   filterByJobType(job: JobListing): FilterResult {
-    if (job.jobType !== this.profile.jobType) {
-      return {
-        passed: false,
-        reason: `Job type '${job.jobType}' does not match preference '${this.profile.jobType}'`
-      };
+    // For Internshala, be more flexible with job types
+    // Many positions are listed as "internship" but are actually full-time roles for freshers
+    const jobType = job.jobType.toLowerCase();
+    const preferredType = this.profile.jobType.toLowerCase();
+
+    // If exact match, always pass
+    if (jobType === preferredType) {
+      return { passed: true };
     }
 
-    return { passed: true };
+    // For Internshala fresher jobs, be more lenient:
+    // - If user wants full-time, also accept internships (many lead to full-time)
+    // - If user wants internship, also accept entry-level full-time
+    if (preferredType === 'full-time' && 
+        (jobType === 'internship' || jobType === 'part-time')) {
+      return { passed: true }; // Many internships convert to full-time
+    }
+
+    if (preferredType === 'internship' && 
+        (jobType === 'full-time' || jobType === 'part-time')) {
+      return { passed: true }; // Entry-level full-time is good for interns
+    }
+
+    if (preferredType === 'part-time' && 
+        (jobType === 'internship' || jobType === 'contract')) {
+      return { passed: true }; // Similar flexibility
+    }
+
+    return {
+      passed: false,
+      reason: `Job type '${job.jobType}' does not match preference '${this.profile.jobType}'`
+    };
   }
 
   filterByLocation(job: JobListing): FilterResult {
     const jobLocation = job.location.toLowerCase();
     const preference = this.profile.locationPreference.toLowerCase();
 
-    // Check location compatibility
+    // For Internshala, be more lenient with location matching
+    // Many fresher jobs are Work from Home or flexible
+    
+    // If user has specific locations, check those first
+    if (this.profile.locations && this.profile.locations.length > 0) {
+      const userLocations = this.profile.locations.map(loc => loc.toLowerCase());
+      const isLocationMatch = userLocations.some(userLoc => 
+        jobLocation.includes(userLoc) || 
+        userLoc.includes(jobLocation) ||
+        jobLocation.includes('work from home') ||
+        jobLocation.includes('remote') ||
+        jobLocation.includes('anywhere')
+      );
+      
+      if (!isLocationMatch) {
+        return {
+          passed: false,
+          reason: `Job location '${job.location}' does not match preferred locations: ${this.profile.locations.join(', ')}`
+        };
+      }
+      return { passed: true };
+    }
+
+    // Check location compatibility based on preference
     switch (preference) {
       case 'remote':
-        if (!jobLocation.includes('remote') && !jobLocation.includes('anywhere')) {
+        if (!jobLocation.includes('remote') && 
+            !jobLocation.includes('work from home') && 
+            !jobLocation.includes('anywhere')) {
           return {
             passed: false,
             reason: `Job location '${job.location}' is not remote, but user prefers remote work`
@@ -48,7 +97,7 @@ export class HardFilter {
         break;
       
       case 'onsite':
-        if (jobLocation.includes('remote')) {
+        if (jobLocation.includes('remote') || jobLocation.includes('work from home')) {
           return {
             passed: false,
             reason: `Job is remote but user prefers onsite work`

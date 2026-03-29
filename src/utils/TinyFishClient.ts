@@ -10,16 +10,6 @@ export interface TinyFishClient extends EventEmitter {
   submitForm(): Promise<void>;
 }
 
-export interface FormField {
-  name: string;
-  type: 'text' | 'email' | 'textarea' | 'select' | 'file';
-  value?: string;
-  required: boolean;
-}
-
-/**
- * Real TinyFish API Client Implementation with SSE Streaming
- */
 export class RealTinyFishClient extends EventEmitter implements TinyFishClient {
   private apiKey: string;
 
@@ -27,283 +17,326 @@ export class RealTinyFishClient extends EventEmitter implements TinyFishClient {
     super();
     this.apiKey = apiKey || process.env.TINYFISH_API_KEY || '';
     if (!this.apiKey) {
-      console.warn('⚠️  TinyFish API key not found. Set TINYFISH_API_KEY in .env file.');
-      console.warn('   Get your API key from: https://agent.tinyfish.ai/api-keys');
+      console.warn('⚠️  TinyFish API key not found. Set TINYFISH_API_KEY in .env');
     }
   }
 
   async searchJobs(strategy: SearchStrategy): Promise<JobListing[]> {
     const jobs: JobListing[] = [];
-
-    console.log(`🔍 Job boards to search:`, strategy.jobBoards);
+    console.log(`🔍 Job boards:`, strategy.jobBoards);
 
     for (const jobBoard of strategy.jobBoards) {
-      const boardLower = jobBoard.toLowerCase();
-
-      if (boardLower.includes('linkedin')) {
-        console.log(`🔍 Searching LinkedIn with SSE streaming...`);
-        const linkedInJobs = await this.searchLinkedIn(strategy);
-        jobs.push(...linkedInJobs);
+      if (jobBoard.toLowerCase().includes('internshala')) {
+        const internshalaJobs = await this.searchInternshala(strategy);
+        jobs.push(...internshalaJobs);
       }
     }
 
-    console.log(`📊 Total jobs found across all boards: ${jobs.length}`);
+    console.log(`📊 Total jobs found: ${jobs.length}`);
     return jobs;
   }
 
-  private async searchLinkedIn(strategy: SearchStrategy): Promise<JobListing[]> {
-    try {
-      // Use only role + primary tech — too many keywords = 0 results
-      const primaryKeywords = strategy.keywords.slice(0, 3).join(' ');
-      const locations = strategy.filters.locations?.length
-        ? strategy.filters.locations
-        : ['India']; // fallback
+  /**
+   * Build the correct Internshala URL based on role, tech stack, experience, location
+   * Internshala URL patterns:
+   *   /jobs/{category}/                        — all jobs in category
+   *   /jobs/{category}/work-from-home/         — WFH only
+   *   /fresher-jobs/{category}/                — fresher jobs in category
+   *   /fresher-jobs/{category}/work-from-home/ — fresher + WFH
+   */
+  private buildInternshalaUrl(strategy: SearchStrategy): string {
+    const role = (strategy.keywords[0] || '').toLowerCase();
+    const tech = (strategy.keywords[1] || '').toLowerCase();
+    const isFresher = strategy.filters.experienceLevel === 'entry-level';
+    const isWFH = ['remote', 'work from home', 'wfh'].some(w =>
+      strategy.filters.locations?.some(loc => loc.toLowerCase().includes(w)) || false
+    );
 
-      // f_TPR is in SECONDS: postingAgeWindow is in days → multiply by 86400
-      const postedWithinSeconds = (strategy.filters.postedWithin || 7) * 86400;
+    // Expanded Internshala category mapping for better fresher job coverage
+    const categoryMap: [string[], string][] = [
+      // Web Development (most common for freshers)
+      [['react', 'vue', 'angular', 'frontend', 'front end', 'web developer', 'web development', 'html', 'css', 'javascript', 'js'], 'web-development-jobs'],
+      
+      // Computer Science (broad category for software roles)
+      [['python', 'django', 'flask', 'node', 'backend', 'full stack', 'fullstack', 'java', 'spring', 'software', 'developer', 'engineer', 'programming', 'coding', 'computer science', 'cs', 'it'], 'computer-science-jobs'],
+      
+      // Mobile Development
+      [['android', 'ios', 'mobile', 'app development', 'flutter', 'react native'], 'mobile-app-development-jobs'],
+      
+      // Data Science & Analytics
+      [['data science', 'machine learning', 'ml', 'ai', 'deep learning', 'nlp', 'analytics', 'data analyst'], 'data-science-jobs'],
+      
+      // Digital Marketing (good for freshers)
+      [['digital marketing', 'seo', 'sem', 'social media marketing', 'marketing', 'content marketing'], 'digital-marketing-jobs'],
+      
+      // Design
+      [['graphic design', 'ui ux', 'ui/ux', 'figma', 'design', 'designer', 'photoshop'], 'graphic-design-jobs'],
+      
+      // Content & Writing
+      [['content writing', 'copywriting', 'content', 'writing', 'blogger'], 'content-writing-jobs'],
+      
+      // Business & Finance
+      [['finance', 'accounting', 'ca', 'chartered', 'mba finance', 'business analyst'], 'finance-jobs'],
+      
+      // HR & Operations
+      [['hr', 'human resource', 'recruitment', 'talent', 'operations'], 'hr-jobs'],
+      
+      // Sales & Business Development
+      [['sales', 'business development', 'bd', 'account manager'], 'sales-jobs'],
+    ];
 
-      // LinkedIn supports multiple locations via repeated `location` params
-      const baseParams = new URLSearchParams({
-        keywords: primaryKeywords,
-        f_TPR: `r${postedWithinSeconds}`,
-        f_JT: this.mapJobType(strategy.filters.jobType),
-        f_AL: 'true', // Easy Apply only
-        sortBy: 'DD',  // Most recent first
-      });
-
-      // Append each location as a separate param
-      for (const loc of locations) {
-        baseParams.append('location', loc);
+    // Find best matching category (prioritize exact matches)
+    let category = 'computer-science-jobs'; // safe default for tech roles
+    let bestMatch = 0;
+    
+    for (const [keywords, slug] of categoryMap) {
+      const matches = keywords.filter(k => 
+        role.includes(k) || tech.includes(k) || 
+        k.includes(role) || k.includes(tech)
+      ).length;
+      
+      if (matches > bestMatch) {
+        bestMatch = matches;
+        category = slug;
       }
+    }
 
-      const linkedInUrl = `https://www.linkedin.com/jobs/search/?${baseParams.toString()}`;
-      console.log(`🔍 Searching LinkedIn: ${linkedInUrl}`);
+    // Always use fresher-jobs for entry-level to get maximum coverage
+    const base = isFresher || strategy.filters.experienceLevel === 'entry-level'
+      ? `https://internshala.com/fresher-jobs/${category}/`
+      : `https://internshala.com/jobs/${category}/`;
 
-      // Run automation — streaming_url comes from the SSE STREAMING_URL event
-      const goal = `You are an autonomous job application agent.
+    return isWFH ? `${base}work-from-home/` : base;
+  }
 
-MISSION: Search for jobs on LinkedIn and APPLY to eligible positions.
+  private async searchInternshala(strategy: SearchStrategy): Promise<JobListing[]> {
+    try {
+      const internshalaUrl = this.buildInternshalaUrl(strategy);
+      console.log(`🔍 Internshala target URL: ${internshalaUrl}`);
 
-STEP 1: Navigate and Search
-- Go to: ${linkedInUrl}
-- Wait for page to load completely
-- Dismiss any sign-in modals or popups
-- Verify you see job listings
+      const techStack = strategy.keywords.slice(0, 5).join(', ');
+      const location = strategy.filters.locations?.join(', ') || 'any';
+      const hasLogin = !!(process.env.INTERNSHALA_EMAIL && process.env.INTERNSHALA_PASSWORD);
 
-STEP 2: For EACH job listing (process at least 5 jobs):
+      // Create a broader tech keywords list for better matching
+      const broadTechKeywords = [
+        ...strategy.keywords,
+        'web development', 'programming', 'software', 'coding', 'developer', 'engineer',
+        'IT', 'computer science', 'frontend', 'backend', 'fullstack', 'javascript',
+        'html', 'css', 'react', 'node', 'python', 'java', 'php', 'mysql', 'database'
+      ].join(', ');
 
-  A. Extract Job Information:
-     - Job title
+      const goal = `You are an autonomous job application agent on Internshala, India's top fresher job portal.
+
+MISSION: Act like a human user, login naturally, then apply to jobs seamlessly.
+
+STEP 1: Warm-up Navigation (CRITICAL - Makes bot look human)
+- First visit homepage: https://internshala.com
+- Wait 3-4 seconds for page to load completely
+- Scroll down slightly (200-300 pixels) to mimic human browsing
+- Wait another 2 seconds
+- This warm-up reduces captcha triggers significantly
+
+STEP 2: Human-Like Login Strategy
+${hasLogin ? `- Navigate to login page: https://internshala.com/login
+- Wait 3-5 seconds after page loads (don't rush)
+- Click email field (don't type immediately)
+- Type email slowly like a human: ${process.env.INTERNSHALA_EMAIL}
+  * Type character by character with small delays (100-200ms between characters)
+- Wait 1-2 seconds after finishing email
+- Click password field
+- Type password slowly like a human: ${process.env.INTERNSHALA_PASSWORD}
+  * Again, character by character with small delays
+- Wait 2 seconds before clicking login (humans pause to review)
+- Click Login button (do NOT click instantly after typing)
+
+LOGIN SUCCESS DETECTION (Proper Detection):
+- Check if URL still contains "/login" - if yes, login failed
+- Look for these SUCCESS indicators:
+  * "My Applications" text/link
+  * Profile dropdown menu
+  * "Logout" option
+  * User name displayed
+- If URL redirected away from login page AND success indicators present = SUCCESS
+- If still on login page after 10 seconds = FAILED
+
+SMART CAPTCHA HANDLING:
+- If "Captcha error. Please try again." dialog appears:
+  1. Click "Close" button to dismiss dialog
+  2. Wait 10 seconds (let system cool down)
+  3. Try clicking Login button ONCE more (do NOT retry multiple times)
+  4. If captcha appears again: SKIP login completely
+  5. Continue to job browsing without login
+
+- If reCAPTCHA checkbox appears: click it and wait for verification
+- If image captcha appears: try to solve if simple, otherwise skip login
+
+- Do NOT retry login more than ONCE total
+- If login fails: continue anyway with job browsing only` : `- Skip login step since no credentials provided`}
+
+STEP 3: Navigate to job listings (after login attempt)
+- Go to: ${internshalaUrl}
+- Wait for job listings to load (JavaScript heavy - wait 3-5 seconds)
+- You should see job cards with titles, companies, locations, salaries
+- If login was successful: applications will be seamless without captcha
+- If login failed: you can still browse and try applications (some might work)
+
+STEP 4: Process jobs efficiently (target 10+ jobs):
+
+  A. Read each job card quickly:
+     - Job title (clickable heading)
      - Company name
-     - Location
-     - Job type (full-time, part-time, contract, internship)
-     - Posting date (convert "2 days ago" to actual date YYYY-MM-DD)
-     - Required experience level
-     - Tech stack/skills mentioned
-     - Job description summary
-     - Apply URL
+     - Location ("Work from home" or city name)
+     - Salary (₹ X - Y /year)
+     - Experience ("No experience required", "Fresher Job", "X year(s)")
+     - Skills/technologies mentioned
+     - Posting date ("Today", "X days ago")
 
-  B. Check Eligibility:
-     - Does it match tech stack: ${strategy.keywords.slice(0, 5).join(', ')}?
-     - Is experience requirement 0-3 years?
-     - Is location in: ${locations.join(', ')}?
+  B. Check eligibility (BE LENIENT):
+     - Tech match: ANY of these keywords: ${broadTechKeywords}
+     - Experience: 0-3 years, fresher-friendly roles
+     - Location: ${location}, remote, or any location
 
-  C. If ELIGIBLE:
-     - Look ONLY for the "Easy Apply" button (LinkedIn's built-in apply)
-     - If "Easy Apply" button exists:
-         * Click it to open the Easy Apply modal
-         * Fill all fields step by step
-         * Use these defaults if fields are empty:
-           Name: John Doe
-           Email: john.doe@email.com
-           Phone: +1-555-0123
-         * Click Next on each step until you reach Submit
-         * Submit the application
-         * Record as "applied"
-     - If only a regular "Apply" button exists (redirects externally):
-         * DO NOT click it
-         * Record as "skipped" with reason "no_easy_apply"
-     - If no apply button found at all:
-         * Record as "skipped" with reason "no_apply_button"
+  C. If ELIGIBLE - Apply:
+     - Click job title to open details
+     - Click "Apply Now" button
+     - If logged in successfully: form should open directly WITHOUT login prompt
+     - If login prompt appears (not logged in): 
+       * Try entering credentials once
+       * If captcha appears: skip this job, continue to next
+     - Fill application form:
+       * Cover letter: "I am a motivated fresher eager to contribute with my technical skills."
+       * Fill other required fields with reasonable defaults
+       * Click Submit/Apply
+       * Record as "applied"
+     - If external redirect: record "skipped" with "external_application"
+     - Navigate back to job list
 
-  D. If NOT ELIGIBLE:
-     - Record as "skipped" with specific reason
+  D. If NOT eligible: record "skipped" with specific reason
 
-  E. If ERROR occurs:
-     - Record as "failed" with error message
-     - Continue to next job
+  E. On any error: record "failed", continue to next job
 
-STEP 3: Handle Special Cases
-- If login required → STOP and return what you have so far
-- If captcha appears → Skip that job, continue to next
-- If rate limited → STOP and return what you have
+STEP 5: Handle edge cases efficiently
+- Modal blocking page? Close it and continue
+- Rate limited? Stop and return results
+- Max 45 seconds per job (don't get stuck)
+- If too many captcha errors: stop and return results
 
-STEP 4: Return ONLY valid JSON in this exact format:
+STEP 6: Return ONLY this JSON (no markdown):
 {
   "jobs": [
     {
       "title": "string",
       "company": "string",
       "location": "string",
-      "jobType": "string",
+      "jobType": "full-time",
       "postingDate": "YYYY-MM-DD",
       "experience": "string",
       "skills": ["string"],
+      "salary": "string",
       "description": "string",
       "applyUrl": "string",
       "applicationStatus": "applied" | "skipped" | "failed",
       "applicationReason": "string"
     }
   ],
-  "summary": {
-    "total": number,
-    "applied": number,
-    "skipped": number,
-    "failed": number
-  }
-}
+  "summary": { "total": 0, "applied": 0, "skipped": 0, "failed": 0 }
+}`;
 
-IMPORTANT:
-- Process at least 5 jobs
-- Actually click apply buttons and submit forms where possible
-- Return detailed status for each job`;
+      const result = await this.runTinyFishAutomationSSE(internshalaUrl, goal);
+      return this.parseJobs(result, 'internshala');
 
-      console.log(`🤖 Starting TinyFish SSE automation with live browser stream...`);
-      const result = await this.runTinyFishAutomationSSE(linkedInUrl, goal);
-      console.log(`✅ TinyFish SSE API completed`);
-
-      const jobs = this.parseLinkedInJobs(result);
-      console.log(`📊 Successfully parsed ${jobs.length} jobs from LinkedIn`);
-      return jobs;
     } catch (error) {
-      console.error('❌ LinkedIn search error:', error);
-      if (error instanceof Error) {
-        console.error('Error details:', error.message);
-      }
+      console.error('❌ Internshala search error:', error);
       return [];
     }
   }
 
   private async runTinyFishAutomationSSE(url: string, goal: string): Promise<any> {
-    if (!this.apiKey) {
-      throw new Error('TinyFish API key is required. Set TINYFISH_API_KEY environment variable.');
-    }
+    if (!this.apiKey) throw new Error('TinyFish API key required.');
 
-    try {
-      console.log(`🤖 Running TinyFish SSE automation...`);
-      console.log(`   URL: ${url}`);
-      console.log(`   Goal: ${goal.substring(0, 100)}...`);
+    console.log(`🤖 Running TinyFish SSE automation...`);
+    console.log(`   URL: ${url}`);
+    console.log(`   Goal preview: ${goal.substring(0, 100)}...`);
 
-      const response = await axios.post(
-        'https://agent.tinyfish.ai/v1/automation/run-sse',
-        {
-          url,
-          goal,
-          browser_profile: 'stealth'
+    const response = await axios.post(
+      'https://agent.tinyfish.ai/v1/automation/run-sse',
+      { url, goal, browser_profile: 'stealth' },
+      {
+        headers: {
+          'X-API-Key': this.apiKey,
+          'Content-Type': 'application/json',
+          'Accept': 'text/event-stream'
         },
-        {
-          headers: {
-            'X-API-Key': this.apiKey,
-            'Content-Type': 'application/json',
-            'Accept': 'text/event-stream'
-          },
-          responseType: 'stream',
-          timeout: 600000 // 10 minutes
-        }
-      );
+        responseType: 'stream',
+        timeout: 600000
+      }
+    );
 
-      let finalResult: any = null;
-      const stream = response.data;
+    let finalResult: any = null;
+    const stream = response.data;
 
-      return new Promise((resolve, reject) => {
-        let buffer = '';
+    return new Promise((resolve, reject) => {
+      let buffer = '';
 
-        stream.on('data', (chunk: Buffer) => {
-          buffer += chunk.toString();
-          const lines = buffer.split('\n');
-          buffer = lines.pop() || '';
+      stream.on('data', (chunk: Buffer) => {
+        buffer += chunk.toString();
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
 
-          for (const line of lines) {
-            if (!line.startsWith('data: ')) continue;
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          try {
+            const event = JSON.parse(line.slice(6));
 
-            try {
-              const eventData = JSON.parse(line.slice(6));
-
-              if (eventData.type === 'STARTED') {
-                console.log(`🚀 TinyFish automation started`);
-                this.emit('progress', { message: 'Automation started', purpose: eventData.purpose });
-              }
-
-              if (eventData.type === 'STREAMING_URL') {
-                const streamingUrl = eventData.streaming_url;
-                console.log(`📺 STREAMING_URL received: ${streamingUrl}`);
-                this.emit('streamingUrl', streamingUrl);
-              }
-
-              if (eventData.type === 'PROGRESS') {
-                console.log(`⏳ Progress: ${eventData.purpose}`);
-                this.emit('progress', { message: eventData.purpose, purpose: eventData.purpose });
-              }
-
-              if (eventData.type === 'COMPLETE') {
-                console.log(`✅ TinyFish automation completed`);
-                finalResult = eventData.result;
-              }
-
-              if (eventData.type === 'ERROR') {
-                console.error(`❌ TinyFish error: ${eventData.error}`);
-                reject(new Error(eventData.error));
-              }
-
-            } catch (parseError) {
-              console.warn('Failed to parse SSE event:', line);
+            if (event.type === 'STARTED') {
+              console.log(`🚀 Automation started`);
+              this.emit('progress', { message: 'Agent started on Internshala' });
             }
+
+            if (event.type === 'STREAMING_URL') {
+              // SSE streaming URL — the correct live browser view
+              console.log(`📺 Live browser stream: ${event.streaming_url}`);
+              this.emit('streamingUrl', event.streaming_url);
+            }
+
+            if (event.type === 'PROGRESS') {
+              console.log(`⏳ ${event.purpose}`);
+              this.emit('progress', { message: event.purpose, purpose: event.purpose });
+            }
+
+            if (event.type === 'COMPLETE') {
+              console.log(`✅ Automation complete`);
+              finalResult = event.result;
+            }
+
+            if (event.type === 'ERROR') {
+              console.error(`❌ TinyFish error: ${event.error}`);
+              reject(new Error(event.error));
+            }
+
+          } catch {
+            // Heartbeat or non-JSON lines — ignore
           }
-        });
-
-        stream.on('end', () => {
-          console.log(`🏁 SSE stream ended`);
-          resolve(finalResult);
-        });
-
-        stream.on('error', (error: Error) => {
-          console.error('❌ SSE stream error:', error);
-          reject(error);
-        });
+        }
       });
 
-    } catch (error) {
-      if (axios.isAxiosError(error)) {
-        console.error('❌ TinyFish SSE API error:', error.response?.data || error.message);
-        console.error('   Status:', error.response?.status);
-        if (error.response?.status === 401) {
-          throw new Error('Invalid TinyFish API key. Check your TINYFISH_API_KEY environment variable.');
-        }
-      }
-      throw error;
-    }
+      stream.on('end', () => {
+        console.log(`🏁 SSE stream ended`);
+        resolve(finalResult);
+      });
+
+      stream.on('error', (err: Error) => {
+        console.error('❌ SSE stream error:', err);
+        reject(err);
+      });
+    });
   }
 
-  private mapJobType(jobType?: string): string {
-    const mapping: Record<string, string> = {
-      'full-time': 'F',
-      'part-time': 'P',
-      'contract': 'C',
-      'internship': 'I'
-    };
-    return mapping[jobType || 'full-time'] || 'F';
-  }
-
-  private parseLinkedInJobs(result: any): JobListing[] {
-    console.log('🔍 Parsing LinkedIn jobs from result:', typeof result, result);
-
-    if (!result) {
-      console.warn('⚠️  Result is null or undefined');
-      return [];
-    }
+  private parseJobs(result: any, source: string): JobListing[] {
+    if (!result) { console.warn('⚠️  No result returned'); return []; }
 
     let jobsArray: any[] = [];
-
     if (Array.isArray(result)) {
       jobsArray = result;
     } else if (result.jobs && Array.isArray(result.jobs)) {
@@ -311,48 +344,32 @@ IMPORTANT:
     } else if (typeof result === 'string') {
       try {
         const parsed = JSON.parse(result);
-        if (Array.isArray(parsed)) {
-          jobsArray = parsed;
-        } else if (parsed.jobs && Array.isArray(parsed.jobs)) {
-          jobsArray = parsed.jobs;
-        }
-      } catch (e) {
-        console.error('❌ Failed to parse result as JSON:', e);
-      }
+        jobsArray = Array.isArray(parsed) ? parsed : (parsed.jobs || []);
+      } catch { console.error('❌ JSON parse failed'); }
     }
 
-    if (jobsArray.length === 0) {
-      console.warn('⚠️  No jobs found in TinyFish result');
-      console.warn('   Result structure:', Object.keys(result || {}));
-      return [];
-    }
+    if (!jobsArray.length) { console.warn('⚠️  Zero jobs parsed'); return []; }
 
-    console.log(`📊 Found ${jobsArray.length} jobs to parse`);
-
+    console.log(`📊 Parsing ${jobsArray.length} jobs from ${source}`);
     if (result.summary) {
-      console.log(`📊 Application Summary:`, result.summary);
-      console.log(`   ✅ Applied: ${result.summary.applied || 0}`);
-      console.log(`   ⏭️  Skipped: ${result.summary.skipped || 0}`);
-      console.log(`   ❌ Failed: ${result.summary.failed || 0}`);
+      console.log(`📊 Applied: ${result.summary.applied || 0} | Skipped: ${result.summary.skipped || 0} | Failed: ${result.summary.failed || 0}`);
     }
 
-    return jobsArray.map((job: any, index: number) => {
-      if (job.applicationStatus) {
-        const statusEmoji = job.applicationStatus === 'applied' ? '✅' :
-          job.applicationStatus === 'skipped' ? '⏭️' : '❌';
-        console.log(`${statusEmoji} ${job.title} at ${job.company}: ${job.applicationStatus} - ${job.applicationReason || 'N/A'}`);
-      }
+    return jobsArray.map((job: any, i: number) => {
+      const emoji = job.applicationStatus === 'applied' ? '✅' :
+                    job.applicationStatus === 'skipped' ? '⏭️' : '❌';
+      console.log(`${emoji} ${job.title} @ ${job.company}: ${job.applicationStatus} — ${job.applicationReason || ''}`);
 
       return {
-        id: job.id || `linkedin-${Date.now()}-${index}`,
-        title: job.title || 'Unknown Title',
-        company: job.company || 'Unknown Company',
+        id: `${source}-${Date.now()}-${i}`,
+        title: job.title || 'Unknown',
+        company: job.company || 'Unknown',
         postingDate: this.parseDate(job.postingDate),
         location: job.location || 'Unknown',
         jobType: this.normalizeJobType(job.jobType) as any,
         requiredExperience: this.parseExperience(job.experience),
         techStack: this.parseTechStack(job.skills),
-        description: job.description || '',
+        description: job.description || job.salary || '',
         applyUrl: job.applyUrl || '',
         applicationStatus: job.applicationStatus,
         applicationReason: job.applicationReason
@@ -360,73 +377,52 @@ IMPORTANT:
     });
   }
 
-  private parseDate(dateStr: string): Date {
-    if (!dateStr) return new Date();
-
-    const daysAgoMatch = dateStr.match(/(\d+)\s+days?\s+ago/i);
-    if (daysAgoMatch) {
-      const days = parseInt(daysAgoMatch[1]);
-      return new Date(Date.now() - days * 24 * 60 * 60 * 1000);
-    }
-
-    const weeksAgoMatch = dateStr.match(/(\d+)\s+weeks?\s+ago/i);
-    if (weeksAgoMatch) {
-      const weeks = parseInt(weeksAgoMatch[1]);
-      return new Date(Date.now() - weeks * 7 * 24 * 60 * 60 * 1000);
-    }
-
-    const parsed = new Date(dateStr);
-    return isNaN(parsed.getTime()) ? new Date() : parsed;
+  private parseDate(s: string): Date {
+    if (!s) return new Date();
+    if (/today/i.test(s)) return new Date();
+    const d = s.match(/(\d+)\s+days?\s+ago/i);
+    if (d) return new Date(Date.now() - +d[1] * 86400000);
+    const w = s.match(/(\d+)\s+weeks?\s+ago/i);
+    if (w) return new Date(Date.now() - +w[1] * 7 * 86400000);
+    const p = new Date(s);
+    return isNaN(p.getTime()) ? new Date() : p;
   }
 
-  private normalizeJobType(jobType: string): string {
-    const normalized = jobType?.toLowerCase() || '';
-    if (normalized.includes('full')) return 'full-time';
-    if (normalized.includes('part')) return 'part-time';
-    if (normalized.includes('contract')) return 'contract';
-    if (normalized.includes('intern')) return 'internship';
+  private normalizeJobType(t: string): string {
+    const s = t?.toLowerCase() || '';
+    if (s.includes('full')) return 'full-time';
+    if (s.includes('part')) return 'part-time';
+    if (s.includes('contract')) return 'contract';
+    if (s.includes('intern')) return 'internship';
     return 'full-time';
   }
 
-  private parseExperience(expStr: string): { min: number; max: number } {
-    if (!expStr) return { min: 0, max: 10 };
-
-    const match = expStr.match(/(\d+)[\s-]+(\d+)/);
-    if (match) {
-      return { min: parseInt(match[1]), max: parseInt(match[2]) };
-    }
-
-    const singleMatch = expStr.match(/(\d+)/);
-    if (singleMatch) {
-      const years = parseInt(singleMatch[1]);
-      return { min: years, max: years + 2 };
-    }
-
-    return { min: 0, max: 10 };
+  private parseExperience(s: string): { min: number; max: number } {
+    if (!s) return { min: 0, max: 5 };
+    if (/no experience|fresher|0 year/i.test(s)) return { min: 0, max: 1 };
+    const r = s.match(/(\d+)[\s-]+(\d+)/);
+    if (r) return { min: +r[1], max: +r[2] };
+    const n = s.match(/(\d+)/);
+    if (n) return { min: +n[1], max: +n[1] + 1 };
+    return { min: 0, max: 5 };
   }
 
   private parseTechStack(skills: string | string[]): string[] {
     if (Array.isArray(skills)) return skills;
-    if (typeof skills === 'string') {
-      return skills.split(/[,;]/).map(s => s.trim()).filter(s => s);
-    }
+    if (typeof skills === 'string') return skills.split(/[,;]/).map(s => s.trim()).filter(Boolean);
     return [];
   }
 
   async clickApplyButton(jobUrl: string): Promise<void> {
-    // Application is handled entirely within searchLinkedIn goal
-    console.log(`📝 Application handled during main search run for: ${jobUrl}`);
+    console.log(`📝 Application handled in main run: ${jobUrl}`);
   }
-
-  async uploadResume(file: Buffer): Promise<void> {
-    console.log('📄 Resume upload handled during application process');
+  async uploadResume(_file: Buffer): Promise<void> {
+    console.log('📄 Resume handled in main run');
   }
-
-  async fillFormField(fieldName: string, value: string): Promise<void> {
-    console.log(`📝 Form field ${fieldName} handled during application process`);
+  async fillFormField(fieldName: string, _value: string): Promise<void> {
+    console.log(`📝 Field ${fieldName} handled in main run`);
   }
-
   async submitForm(): Promise<void> {
-    console.log('✉️  Form submission handled during application process');
+    console.log('✉️  Submission handled in main run');
   }
 }

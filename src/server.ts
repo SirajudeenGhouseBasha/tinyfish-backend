@@ -5,7 +5,7 @@ import { config } from './config';
 import { WebSocketService } from './services/WebSocketService';
 import profileRoutes from './routes/profileRoutes';
 import { createJobSearchRoutes } from './routes/jobSearchRoutes';
-import linkedinRoutes from './routes/linkedinRoutes';
+import internshalaRoutes from './routes/internshalaRoutes';
 
 const app = express();
 const httpServer = createServer(app);
@@ -21,7 +21,7 @@ app.use(express.urlencoded({ extended: true }));
 // Routes
 app.use('/api/profile', profileRoutes);
 app.use('/api/job-search', createJobSearchRoutes(wsService));
-app.use('/api/linkedin', linkedinRoutes);
+app.use('/api/internshala', internshalaRoutes);
 
 // Health check
 app.get('/health', (req, res) => {

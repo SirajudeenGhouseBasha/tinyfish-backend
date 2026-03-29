@@ -5,7 +5,7 @@ import { config } from '../config';
 const router = Router();
 
 /**
- * POST /api/linkedin/run
+ * POST /api/internshala/run
  * Proxies a TinyFish SSE automation run to keep the API key server-side.
  * Streams SSE events directly back to the client.
  */
@@ -24,7 +24,7 @@ router.post('/run', (req: Request, res: Response) => {
   }
 
   const payload = JSON.stringify({
-    url: url || 'https://www.linkedin.com/jobs/search',
+    url: url || 'https://internshala.com/jobs/',
     goal,
     browser_profile: browser_profile || 'stealth',
     use_vault: use_vault !== undefined ? use_vault : true,
