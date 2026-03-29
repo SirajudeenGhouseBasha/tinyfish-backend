@@ -10,6 +10,7 @@ import { ApplicationExecutor } from './ApplicationExecutor';
 import { ApplicationTracker } from './ApplicationTracker';
 import { TinyFishClient, RealTinyFishClient } from './TinyFishClient';
 import { MockTinyFishClient } from './MockTinyFishClient';
+import { ExcelReportGenerator } from './ExcelReportGenerator';
 
 interface SessionResult {
   sessionId: string;
@@ -165,7 +166,51 @@ export class JobAgentOrchestrator extends EventEmitter {
           `No jobs qualified (highest score: ${highestScore}/105). Consider adjusting filters or expanding search.`);
       }
 
-      // Stage 8: Application Execution
+      // Stage 8: Generate Excel Report with Sorted Jobs for Manual Application
+      this.emitLog(sessionId, PipelineStage.ReportGeneration, LogLevel.Info,
+        'Generating Excel report with sorted jobs for manual application');
+
+      const { ExcelReportGenerator } = await import('./ExcelReportGenerator');
+      const excelGenerator = new ExcelReportGenerator();
+      
+      // Create session report
+      const sessionReport = {
+        sessionId,
+        summary: {
+          totalScanned: stats.totalScanned,
+          eliminated: stats.eliminatedStage1,
+          scored: stats.scoredStage3,
+          applied: stats.applied,
+          failed: stats.failed
+        },
+        applications: this.applicationTracker.getAllApplications()
+      };
+
+      // Sort all jobs by score (highest first) for manual application
+      const allSortedJobs = scoredJobs
+        .sort((a, b) => b.totalScore - a.totalScore)
+        .map(scoredJob => ({
+          ...scoredJob.job,
+          score: scoredJob.totalScore,
+          qualifies: scoredJob.qualifies
+        }));
+
+      // Generate Excel with job collection sheet
+      const excelBuffer = await excelGenerator.generateExcelReport(sessionReport, sessionId, allSortedJobs);
+      const filename = excelGenerator.getReportFilename(sessionId);
+
+      // Emit Excel report for download
+      this.emit('excelReport', {
+        sessionId,
+        buffer: excelBuffer,
+        filename,
+        mimeType: excelGenerator.getReportMimeType()
+      });
+
+      this.emitLog(sessionId, PipelineStage.ReportGeneration, LogLevel.Success,
+        `Excel report generated: ${filename} with ${allSortedJobs.length} sorted jobs for manual application`);
+
+      // Stage 9: Application Execution (Optional - can be skipped if user prefers manual)
       this.emitLog(sessionId, PipelineStage.Application, LogLevel.Info,
         `Starting applications to ${qualifiedJobs.length} qualified jobs`);
 

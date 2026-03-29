@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import https from 'https';
 import { config } from '../config';
+import { JobSearchService } from '../services/JobSearchService';
 
 const router = Router();
 
@@ -87,6 +88,42 @@ router.post('/run', (req: Request, res: Response) => {
 
   upstreamReq.write(payload);
   upstreamReq.end();
+});
+
+/**
+ * GET /api/internshala/download-report/:sessionId
+ * Download Excel report with sorted jobs for manual application
+ */
+router.get('/download-report/:sessionId', async (req: Request, res: Response) => {
+  try {
+    const sessionId = Array.isArray(req.params.sessionId) ? req.params.sessionId[0] : req.params.sessionId;
+    
+    // Get JobSearchService instance (you might need to pass this from server.ts)
+    // For now, create a new instance
+    const jobSearchService = new JobSearchService();
+    
+    const excelReport = jobSearchService.getExcelReport(sessionId);
+    
+    if (!excelReport) {
+      res.status(404).json({ error: 'Report not found or not ready yet' });
+      return;
+    }
+
+    // Set headers for Excel download
+    res.setHeader('Content-Type', excelReport.mimeType);
+    res.setHeader('Content-Disposition', `attachment; filename="${excelReport.filename}"`);
+    res.setHeader('Content-Length', excelReport.buffer.length);
+
+    // Send the Excel file
+    res.send(excelReport.buffer);
+
+    // Clean up the report from memory after download
+    jobSearchService.clearExcelReport(sessionId);
+    
+  } catch (error) {
+    console.error('Excel download error:', error);
+    res.status(500).json({ error: 'Failed to download report' });
+  }
 });
 
 export default router;

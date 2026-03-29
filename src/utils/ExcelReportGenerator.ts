@@ -1,25 +1,32 @@
-import { SessionReport, ApplicationRecord, ApplicationStatus } from '../types';
+import { SessionReport, ApplicationRecord, ApplicationStatus, JobListing } from '../types';
 import ExcelJS from 'exceljs';
 
 /**
  * Excel Report Generator for Job Application Sessions
- * Generates Excel files with job application data
+ * Generates Excel files with job application data and job collection sheets
  */
 export class ExcelReportGenerator {
   
   /**
-   * Generate Excel report from session data
+   * Generate Excel report with job collection sheet for manual applications
    * @param sessionReport Session report data
    * @param sessionId Session identifier
+   * @param sortedJobs Optional sorted jobs list for manual application
    * @returns Buffer containing Excel file data
    */
-  async generateExcelReport(sessionReport: SessionReport, sessionId: string): Promise<Buffer> {
+  async generateExcelReport(sessionReport: SessionReport, sessionId: string, sortedJobs?: (JobListing & { applicationStatus?: string; score?: number; qualifies?: boolean })[]): Promise<Buffer> {
     const workbook = new ExcelJS.Workbook();
     
     // Set workbook properties
     workbook.creator = 'Intelligent Job Agent';
     workbook.created = new Date();
     workbook.modified = new Date();
+    
+    // Create Job Collection sheet FIRST (most important for manual applications)
+    if (sortedJobs && sortedJobs.length > 0) {
+      const jobsSheet = workbook.addWorksheet('Jobs for Manual Application');
+      this.createJobCollectionSheet(jobsSheet, sortedJobs);
+    }
     
     // Create Summary sheet
     const summarySheet = workbook.addWorksheet('Summary');
@@ -42,6 +49,126 @@ export class ExcelReportGenerator {
     // Generate buffer
     const buffer = await workbook.xlsx.writeBuffer();
     return Buffer.from(buffer);
+  }
+
+  /**
+   * Create job collection sheet for manual applications
+   * @param sheet Excel worksheet
+   * @param jobs Sorted job listings with optional application status
+   */
+  private createJobCollectionSheet(sheet: ExcelJS.Worksheet, jobs: (JobListing & { applicationStatus?: string; score?: number; qualifies?: boolean })[]): void {
+    // Define columns for job collection
+    sheet.columns = [
+      { header: 'Apply URL', key: 'applyUrl', width: 50 },
+      { header: 'Job Title', key: 'title', width: 30 },
+      { header: 'Company Name', key: 'company', width: 25 },
+      { header: 'Location', key: 'location', width: 20 },
+      { header: 'Experience Required', key: 'experience', width: 18 },
+      { header: 'Job Type', key: 'jobType', width: 12 },
+      { header: 'Tech Stack', key: 'techStack', width: 30 },
+      { header: 'Salary/Description', key: 'description', width: 35 },
+      { header: 'Posted Date', key: 'postingDate', width: 15 },
+      { header: 'Application Status', key: 'applicationStatus', width: 18 },
+      { header: 'Notes', key: 'notes', width: 30 }
+    ];
+    
+    // Style header row
+    const headerRow = sheet.getRow(1);
+    headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    headerRow.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FF2E75B6' } // Blue background
+    };
+    headerRow.height = 25;
+    
+    // Add data rows
+    jobs.forEach((job, index) => {
+      const experienceText = `${job.requiredExperience.min}-${job.requiredExperience.max} years`;
+      const techStackText = Array.isArray(job.techStack) ? job.techStack.join(', ') : job.techStack || '';
+      const postingDateText = job.postingDate.toLocaleDateString();
+      const applicationStatus = job.applicationStatus || 'Not Applied';
+      
+      const row = sheet.addRow({
+        applyUrl: job.applyUrl || `https://internshala.com/job/detail/${job.id}`,
+        title: job.title,
+        company: job.company,
+        location: job.location,
+        experience: experienceText,
+        jobType: job.jobType,
+        techStack: techStackText,
+        description: job.description,
+        postingDate: postingDateText,
+        applicationStatus: applicationStatus,
+        notes: '' // Empty for user to fill
+      });
+      
+      // Make URLs clickable
+      const urlCell = row.getCell('applyUrl');
+      if (job.applyUrl) {
+        urlCell.value = {
+          text: job.applyUrl,
+          hyperlink: job.applyUrl
+        };
+        urlCell.font = { color: { argb: 'FF0563C1' }, underline: true };
+      }
+      
+      // Color code by application status
+      if (applicationStatus === 'applied') {
+        row.getCell('applicationStatus').fill = {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: { argb: 'FF92D050' } // Green
+        };
+      } else if (applicationStatus === 'failed') {
+        row.getCell('applicationStatus').fill = {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: { argb: 'FFFF6B6B' } // Red
+        };
+      } else if (applicationStatus === 'skipped') {
+        row.getCell('applicationStatus').fill = {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: { argb: 'FFFFC000' } // Orange
+        };
+      }
+      
+      // Alternate row colors for better readability
+      if (index % 2 === 0) {
+        row.eachCell((cell) => {
+          const currentFill = cell.fill as ExcelJS.FillPattern;
+          if (!currentFill || currentFill.type !== 'pattern' || !currentFill.fgColor) {
+            cell.fill = {
+              type: 'pattern',
+              pattern: 'solid',
+              fgColor: { argb: 'FFF8F9FA' } // Light gray
+            };
+          }
+        });
+      }
+    });
+    
+    // Add instructions at the top
+    sheet.insertRow(1, [
+      'INSTRUCTIONS: Click on URLs in column A to apply directly to jobs. Update "Application Status" and "Notes" columns as you apply.',
+      '', '', '', '', '', '', '', '', '', ''
+    ]);
+    
+    const instructionRow = sheet.getRow(1);
+    instructionRow.font = { bold: true, italic: true, color: { argb: 'FF666666' } };
+    instructionRow.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FFFFF2CC' } // Light yellow
+    };
+    sheet.mergeCells('A1:K1');
+    
+    // Freeze panes to keep headers visible
+    sheet.views = [{ state: 'frozen', xSplit: 0, ySplit: 2 }];
+    
+    // Add auto-filter
+    sheet.autoFilter = 'A2:K' + (jobs.length + 2);
   }
   
   private createSummarySheet(sheet: ExcelJS.Worksheet, report: SessionReport, sessionId: string): void {

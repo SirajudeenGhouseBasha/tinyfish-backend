@@ -9,12 +9,31 @@ export class JobSearchService {
   private orchestrator: JobAgentOrchestrator;
   private reportGenerator: ExcelReportGenerator;
   private wsService?: WebSocketService;
+  private excelReports: Map<string, { buffer: Buffer; filename: string; mimeType: string }> = new Map();
 
   constructor(wsService?: WebSocketService) {
     this.profileService = new ProfileService();
     this.orchestrator = new JobAgentOrchestrator();
     this.reportGenerator = new ExcelReportGenerator();
     this.wsService = wsService;
+
+    // Listen for Excel report generation
+    this.orchestrator.on('excelReport', (data: { sessionId: string; buffer: Buffer; filename: string; mimeType: string }) => {
+      console.log(`📊 Excel report generated for session ${data.sessionId}: ${data.filename}`);
+      this.excelReports.set(data.sessionId, {
+        buffer: data.buffer,
+        filename: data.filename,
+        mimeType: data.mimeType
+      });
+
+      // Notify frontend via WebSocket
+      if (this.wsService) {
+        this.wsService.emitToSession(data.sessionId, 'excelReportReady', {
+          filename: data.filename,
+          downloadUrl: `/api/internshala/download-report/${data.sessionId}`
+        });
+      }
+    });
   }
 
   async startJobSearch(sessionId: string): Promise<{ sessionId: string; status: string }> {
@@ -75,17 +94,22 @@ export class JobSearchService {
     mimeType: string;
   } | null> {
     try {
-      // Check if session exists and is completed
+      // First check if we have a generated Excel report
+      const excelReport = this.excelReports.get(sessionId);
+      if (excelReport) {
+        return excelReport;
+      }
+
+      // Fallback: Generate report from application tracker
       const sessionStatus = await this.getJobSearchStatus(sessionId);
       if (!sessionStatus) {
         return null;
       }
 
-      // Get the application tracker from the orchestrator
       const applicationTracker = this.orchestrator.getApplicationTracker();
       const sessionReport = applicationTracker.generateReport();
 
-      // Generate Excel report
+      // Generate Excel report without sorted jobs (fallback)
       const buffer = await this.reportGenerator.generateExcelReport(sessionReport, sessionId);
       const filename = this.reportGenerator.getReportFilename(sessionId);
       const mimeType = this.reportGenerator.getReportMimeType();
@@ -99,5 +123,19 @@ export class JobSearchService {
       console.error('Report generation error:', error);
       return null;
     }
+  }
+
+  /**
+   * Get Excel report for download
+   */
+  getExcelReport(sessionId: string): { buffer: Buffer; filename: string; mimeType: string } | null {
+    return this.excelReports.get(sessionId) || null;
+  }
+
+  /**
+   * Clear Excel report from memory after download
+   */
+  clearExcelReport(sessionId: string): void {
+    this.excelReports.delete(sessionId);
   }
 }
